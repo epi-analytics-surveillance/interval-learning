@@ -40,7 +40,7 @@ log_likelihood <- function(I, R_t, W_s) {
     }
     
     # Calculate Poisson log-likelihood
-    ll <- ll + I(t) * log(E_I[t]) - log(E_I[t])
+    ll <- ll + I[t] * log(E_I[t]) - E_I[t] - lgamma(I[t] + 1)
   }
   
   return(ll)
