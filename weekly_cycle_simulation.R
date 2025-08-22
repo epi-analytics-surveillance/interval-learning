@@ -7,7 +7,15 @@
 #	Data created:  none
 # Student:       Zimo
 ################################################################################
+# Clean the session
+rm(list=ls()) 
+
+# Change working dictionary
+setwd("~/Documents/Biostatistics/project/R code")
+
 library(dplyr)
+library(ggplot2)
+library(patchwork)
 
 simulate_case_counts <- function(R_t, W_s, I_0 = 10, cycle_pattern = 0) {
   # R_t: A vector of reproduction numbers over time (length = number of days)
@@ -77,7 +85,7 @@ sim_GI_Rt <- function(GI_mean, GI_sd, Rt_mean, Rt_sd, Rt_length) {
   # Generate GI distribution
   W_s_raw <- dlnorm(1:50, meanlog, sdlog)
   W_s <- W_s_raw/sum(W_s_raw) # standardise to make the sum equal to 1
-  W_s <- W_s[W_s  > 1e-15]
+  W_s <- W_s[W_s  > 1e-20]
   
   # Generate simulated reproduction number
   R_t <- rgamma(Rt_length, shape = shape, scale = scale)
@@ -138,49 +146,63 @@ plot(case_count_whole, type = "l")
 # group the case count into 7 days
 n <- length(case_count_whole)  
 num_repeats <- 7
-max_value <- ceiling(n / num_repeats)
-sequence <- rep(1:max_value, each = num_repeats)[1:n]
-data <- data.frame(weeks = sequence, case = case_count_whole)
-groups <- split(data$case, as.factor(data$weeks))
+total_weeks <- ceiling(n / num_repeats)
+sequence <- rep(1:total_weeks, each = num_repeats)[1:n]
+series_data <- data.frame(weeks = sequence, case = case_count_whole)
+groups <- split(series_data$case, as.factor(series_data$weeks))
 
-
-Rt_data <- data.frame()
+Rt_sequence <- data.frame()
 contour_plot <- list()
+all_Rt_values <- numeric(0) 
 
 # Infer Rt and GI
-for (i in 1:length(groups)) {
+for (i in 1:total_weeks) {
   
-  # case count for every 7 days
-  case_count7 = groups[[i]]
+  # case count
+  step_case_count = series_data[series_data$weeks <= i,]$case
   
   # Set GI parameters and Rt mean
-  Data <- expand.grid(GI_mean = seq(1, 10, 1), 
-                      GI_sd = seq(0.5, 5, 0.5), 
-                      Rt_mean = seq(0.5, 3, 0.5))
+  parameters_data <- expand.grid(GI_mean = seq(1, 10, 1), 
+                                 GI_sd = seq(0.5, 5, 0.5), 
+                                 Rt_weekly = seq(0.5, 3, 0.2))
+  
+  # Simulate GI distribution
+  parameters_data$GI <- apply(parameters_data, 1, function(row) {
+    sim_GI_Rt(GI_mean = row["GI_mean"], 
+              GI_sd = row["GI_sd"], 
+              0, 0, 0)$Ws
+  })
   
   # Simulate GI and Rt, and compute log-likelihood for every 7 days
-  for (j in 1:nrow(Data)) {
-    sim_result <- sim_GI_Rt(Data$GI_mean[j],Data$GI_sd[j],Data$Rt_mean[j], Rt_sd = 0.01, 
-                        length(groups[[i]]))
-    Data$GI[j] <- sim_result$Ws
-    Data$Rt[j] <- sim_result$Rt
-    Data$ll[j] <- log_likelihood(case_count7, sim_result$Rt[[1]], sim_result$Ws[[1]])
+  for (j in 1:nrow(parameters_data)) {
+    
+    if (i == 1) {
+      parameters_data$Rt[j] <- list(rep(parameters_data$Rt_weekly[j], length(groups[[i]])))
+    }
+    else {
+      current_Rt <- rep(parameters_data$Rt_weekly[j], length(groups[[i]]))
+      parameters_data$Rt[j] <- list(c(all_Rt_values, current_Rt))
+    }
+    
+    parameters_data$ll[j] <- log_likelihood(step_case_count, 
+                                            parameters_data$Rt[j][[1]], 
+                                            parameters_data$GI[[j]][[1]])
   }
     
   # Select the best fit GI sd for each pair of GI and Rt mean
-  optimal_data <- Data %>%
-    group_by(GI_mean, Rt_mean) %>%
+  optimal_parameters <- parameters_data %>%
+    group_by(GI_mean, Rt_weekly) %>%
     slice(which.max(ll)) %>%
     ungroup() %>%
-    dplyr::select(GI_mean, GI_sd, GI, Rt_mean, Rt, ll) %>%
+    dplyr::select(GI_mean, GI_sd, GI, Rt_weekly, Rt, ll) %>%
     arrange(GI_mean)
   
   # Generate contour plot
-  p <- ggplot(optimal_data, aes(x = GI_mean, y = Rt_mean, z = ll)) +
+  p <- ggplot(optimal_parameters, aes(x = GI_mean, y = Rt_weekly, z = ll)) +
     geom_contour_filled(bins=20) +  # Filled contours
     geom_contour() +  # Add contour lines
     scale_fill_viridis_d(name = "Log-Likelihood") +   # Color scale
-    labs(title = "Log-Likelihood Contour Plot",
+    labs(title = paste0("Log-Likelihood Contour Plot: Week ",i),
          x = "Generation Interval Mean (days)",
          y = "Reproduction Number") + 
     theme_minimal()
@@ -188,11 +210,17 @@ for (i in 1:length(groups)) {
   contour_plot[[i]] <- p
   
   # Extract the row with maximum log-likelihood
-  best_fit <- Data[Data$ll == max(Data$ll),]
+  best_fit <- parameters_data[parameters_data$ll == max(parameters_data$ll),]
   
   # Append to Rt_data (ensure column names match)
-  Rt_data <- rbind(Rt_data, best_fit)
+  Rt_sequence <- rbind(Rt_sequence, best_fit)
+  
+  # Update the accumulated Rt values with the best fit for this week
+  best_Rt_weekly <- best_fit$Rt_weekly
+  current_week_Rt <- rep(best_Rt_weekly, length(groups[[i]]))
+  all_Rt_values <- c(all_Rt_values, current_week_Rt)
 }
 
 # View contour plot for the first week
-contour_plot[[1]]
+contour_plot[[1]] / contour_plot[[19]] |
+  contour_plot[[9]] / contour_plot[[29]]
