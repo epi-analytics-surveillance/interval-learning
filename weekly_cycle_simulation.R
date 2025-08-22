@@ -131,12 +131,12 @@ log_likelihood <- function(I, R_t, W_s) {
 Rt <- rep(1.1, 200)
 Ws <- sim_GI_Rt(GI_mean = 5, 
                 GI_sd = 2, 
-                0, 0, length(case_count_whole))$Ws[[1]]
+                0, 0, 0)$Ws[[1]]
 case_count_whole <- simulate_case_counts(Rt, Ws, I_0 = 1000, cycle_pattern = 7)
 plot(case_count_whole, type = "l")
 
 # group the case count into 7 days
-n <- length(case_count_whole)  # replace your_data with your actual dataset
+n <- length(case_count_whole)  
 num_repeats <- 7
 max_value <- ceiling(n / num_repeats)
 sequence <- rep(1:max_value, each = num_repeats)[1:n]
